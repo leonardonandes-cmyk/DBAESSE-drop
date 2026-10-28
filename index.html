@@ -429,6 +429,24 @@
       <div class="gpriv">Depois do envio, a equipe DBAESSE valida seu acesso para liberar os downloads.</div>
     </form>
 
+    <!-- ESQUECI A SENHA: WhatsApp + CPF/CNPJ do cadastro → senha nova -->
+    <form id="fRedefinir" novalidate hidden>
+      <h2>Criar nova senha</h2>
+      <div class="gsub">Informe o WhatsApp e o CPF ou CNPJ do seu cadastro e crie uma senha nova.</div>
+      <label for="rZap">WhatsApp</label>
+      <input id="rZap" type="tel" inputmode="numeric" autocomplete="tel" placeholder="(37) 99999-9999">
+      <label for="rDoc">CPF ou CNPJ do cadastro</label>
+      <input id="rDoc" inputmode="numeric" autocomplete="off" placeholder="000.000.000-00">
+      <label for="rSenha">Nova senha</label>
+      <input id="rSenha" type="password" autocomplete="new-password" placeholder="Mínimo 4 caracteres">
+      <label for="rSenha2">Repita a nova senha</label>
+      <input id="rSenha2" type="password" autocomplete="new-password">
+      <button type="submit" id="rBtn">Salvar nova senha</button>
+      <div class="gerro" id="rErro"></div>
+      <div class="gtroca"><a href="#" id="rVoltar">Voltar para entrar</a></div>
+      <div class="gtroca">Não lembra o CPF/CNPJ? <a href="#" id="rZapPamela">Falar com o suporte</a></div>
+    </form>
+
     <!-- MENSAGEM -->
     <div class="gmsg" id="gMsg" hidden>
       <div class="gico" id="mIco">&#10003;</div>
@@ -1197,9 +1215,9 @@ function mascaraZap(el){ el.addEventListener("input",()=>{ let d=soDig(el.value)
 
 function abrirGate(tela){
   const g=$("#gate"); g.hidden=false; document.body.classList.add("travado");
-  ["#fLogin","#gateForm","#fCompletar","#gMsg"].forEach(id=>$(id).hidden=true);
-  $({login:"#fLogin",cadastro:"#gateForm",completar:"#fCompletar",msg:"#gMsg"}[tela]).hidden=false;
-  $("#lErro").textContent=""; $("#gErro").textContent=""; if($("#cErro")) $("#cErro").textContent="";
+  ["#fLogin","#gateForm","#fCompletar","#fRedefinir","#gMsg"].forEach(id=>$(id).hidden=true);
+  $({login:"#fLogin",cadastro:"#gateForm",completar:"#fCompletar",redefinir:"#fRedefinir",msg:"#gMsg"}[tela]).hidden=false;
+  $("#lErro").textContent=""; $("#gErro").textContent=""; if($("#cErro")) $("#cErro").textContent=""; $("#rErro").textContent="";
   // sem sessão = entrada obrigatória: esconde o X (não dá pra fechar sem cadastrar/entrar)
   $("#gClose").style.display = sessao() ? "" : "none";
   g.scrollTop=0;
@@ -1269,9 +1287,33 @@ async function pedirDownload(){
   $("#gClose").addEventListener("click",fecharGate);
   $("#irCad").addEventListener("click",e=>{ e.preventDefault(); const z=$("#lZap").value; abrirGate("cadastro"); if(z) $("#gZap").value=z; });
   $("#irLogin").addEventListener("click",e=>{ e.preventDefault(); const z=$("#gZap").value; abrirGate("login"); if(z) $("#lZap").value=z; });
-  $("#esqueci").addEventListener("click",e=>{ e.preventDefault();
-    const z=soDig($("#lZap").value);
+  // ESQUECI A SENHA → tela própria (sem depender da equipe)
+  mascaraZap($("#rZap"));
+  $("#rDoc").addEventListener("input",()=>{ const el=$("#rDoc"); let d=soDig(el.value).slice(0,14);
+    el.value = d.length<=11
+      ? d.replace(/(\d{3})(\d)/,"$1.$2").replace(/(\d{3})(\d)/,"$1.$2").replace(/(\d{3})(\d{1,2})$/,"$1-$2")
+      : d.replace(/^(\d{2})(\d)/,"$1.$2").replace(/^(\d{2})\.(\d{3})(\d)/,"$1.$2.$3").replace(/\.(\d{3})(\d)/,".$1/$2").replace(/(\d{4})(\d)/,"$1-$2"); });
+  $("#esqueci").addEventListener("click",e=>{ e.preventDefault(); const z=$("#lZap").value; abrirGate("redefinir"); if(z) $("#rZap").value=z; });
+  $("#rVoltar").addEventListener("click",e=>{ e.preventDefault(); const z=$("#rZap").value; abrirGate("login"); if(z) $("#lZap").value=z; });
+  $("#rZapPamela").addEventListener("click",e=>{ e.preventDefault(); const z=soDig($("#rZap").value);
     window.open(zapPamela("Olá, Pamela! Esqueci minha senha do Drop DBAESSE."+(z?" Meu WhatsApp: "+z:"")),"_blank"); });
+  $("#fRedefinir").addEventListener("submit",async e=>{
+    e.preventDefault();
+    const zap=soDig($("#rZap").value), doc=soDig($("#rDoc").value);
+    let erro="";
+    if(zap.length<10) erro="Informe seu WhatsApp com DDD.";
+    else if(!docOk(doc)) erro="Informe um CPF ou CNPJ válido.";
+    else if($("#rSenha").value.length<4) erro="Crie uma senha com pelo menos 4 caracteres.";
+    else if($("#rSenha").value!==$("#rSenha2").value) erro="As senhas não são iguais.";
+    $("#rErro").textContent=erro; if(erro) return;
+    const b=$("#rBtn"); b.disabled=true; b.textContent="Salvando…";
+    try{
+      const r=await api({acao:"redefinir",whatsapp:zap,doc,senha:$("#rSenha").value});
+      if(!r.ok){ $("#rErro").textContent=r.erro||"Não foi possível trocar a senha."; }
+      else trataAcesso(r,zap);
+    }catch(err){ $("#rErro").textContent="Sem conexão. Tente de novo."; }
+    b.disabled=false; b.textContent="Salvar nova senha";
+  });
 
   // ENTRAR
   $("#fLogin").addEventListener("submit",async e=>{

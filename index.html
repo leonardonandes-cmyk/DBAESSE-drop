@@ -879,19 +879,55 @@ async function baixarCores(){
   }
   if(!arquivos.length){ aviso("Fotos indisponíveis no momento"); return; }
   // celular: abre o compartilhar do sistema (salvar na galeria / mandar no WhatsApp)
-  if(navigator.canShare && navigator.canShare({files:arquivos})){
+  if(ehCelular() && navigator.canShare && navigator.canShare({files:arquivos})){
     try{ await navigator.share({files:arquivos, title:p.nome}); return; }
     catch(e){ if(e.name==="AbortError") return;
       if(e.name==="NotAllowedError"){ fotosProntas(arquivos,p.nome); return; } }
   }
-  // PC: baixa uma por uma
+  // computador (ou celular sem compartilhar): baixa tudo num .zip
+  baixarZip(arquivos,p.nome);
+}
+// celular/tablet de verdade (no Windows o Chrome/Edge também "compartilha", mas lá queremos baixar)
+function ehCelular(){
+  if(navigator.userAgentData && typeof navigator.userAgentData.mobile==="boolean" && navigator.userAgentData.mobile) return true;
+  const ua=navigator.userAgent||"";
+  if(/Android|iPhone|iPad|iPod|Mobile/i.test(ua)) return true;
+  return /Macintosh/.test(ua) && navigator.maxTouchPoints>1; // iPad que se diz Mac
+}
+// ZIP simples (sem compressão — foto já é comprimida), sem biblioteca externa
+const CRC_T=(()=>{const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0;}return t;})();
+function crc32(u){let c=0xFFFFFFFF;for(let i=0;i<u.length;i++)c=CRC_T[(c^u[i])&255]^(c>>>8);return (c^0xFFFFFFFF)>>>0;}
+async function montaZip(arquivos){
+  const enc=new TextEncoder(), partes=[], central=[]; let off=0;
+  const d=new Date(), dt=((d.getFullYear()-1980)<<9)|((d.getMonth()+1)<<5)|d.getDate(), hr=(d.getHours()<<11)|(d.getMinutes()<<5)|(d.getSeconds()>>1);
+  const usados={};
   for(const f of arquivos){
-    const u=URL.createObjectURL(f), a=document.createElement("a");
-    a.href=u; a.download=f.name; document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(()=>URL.revokeObjectURL(u),4000);
-    await new Promise(r=>setTimeout(r,450));
+    let nome=f.name; if(usados[nome]){ nome=nome.replace(/(\.\w+)$/,"-"+(++usados[f.name])+"$1"); } else usados[nome]=1;
+    const dados=new Uint8Array(await f.arrayBuffer()), nm=enc.encode(nome), crc=crc32(dados);
+    const h=new DataView(new ArrayBuffer(30));
+    h.setUint32(0,0x04034b50,true);h.setUint16(4,20,true);h.setUint16(6,0x0800,true);h.setUint16(8,0,true);
+    h.setUint16(10,hr,true);h.setUint16(12,dt,true);h.setUint32(14,crc,true);h.setUint32(18,dados.length,true);h.setUint32(22,dados.length,true);
+    h.setUint16(26,nm.length,true);h.setUint16(28,0,true);
+    partes.push(h,nm,dados);
+    const c=new DataView(new ArrayBuffer(46));
+    c.setUint32(0,0x02014b50,true);c.setUint16(4,20,true);c.setUint16(6,20,true);c.setUint16(8,0x0800,true);c.setUint16(10,0,true);
+    c.setUint16(12,hr,true);c.setUint16(14,dt,true);c.setUint32(16,crc,true);c.setUint32(20,dados.length,true);c.setUint32(24,dados.length,true);
+    c.setUint16(28,nm.length,true);c.setUint32(42,off,true);
+    central.push(c,nm);
+    off+=30+nm.length+dados.length;
   }
-  aviso(arquivos.length+(arquivos.length>1?" fotos baixadas":" foto baixada"));
+  const tamC=central.reduce((t,x)=>t+x.byteLength,0), fim=new DataView(new ArrayBuffer(22));
+  fim.setUint32(0,0x06054b50,true);fim.setUint16(8,arquivos.length,true);fim.setUint16(10,arquivos.length,true);
+  fim.setUint32(12,tamC,true);fim.setUint32(16,off,true);
+  return new Blob([...partes,...central,fim],{type:"application/zip"});
+}
+async function baixarZip(arquivos,nome){
+  try{
+    const z=await montaZip(arquivos), u=URL.createObjectURL(z), a=document.createElement("a");
+    a.href=u; a.download=hifen(nome)+"-fotos-DBAESSE.zip"; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(u),60000);
+    aviso(arquivos.length+(arquivos.length>1?" fotos baixadas (.zip)":" foto baixada (.zip)"));
+  }catch(e){ aviso("Não foi possível baixar. Tente de novo."); }
 }
 (function(){
   $("#fundo").addEventListener("click",fecharFicha);
@@ -1249,7 +1285,9 @@ let PRONTOS=null;
 function fotosProntas(arquivos,nome){
   PRONTOS={arquivos,nome};
   mensagem({tit:"Fotos prontas",txt:arquivos.length+(arquivos.length>1?" fotos separadas.":" foto separada.")+" Toque para salvar ou enviar.",
-    btn:"Salvar fotos",acao:async()=>{ fecharGate(); try{ await navigator.share({files:PRONTOS.arquivos,title:PRONTOS.nome}); }catch(e){} }});
+    btn:"Salvar fotos",acao:async()=>{ fecharGate();
+      try{ await navigator.share({files:PRONTOS.arquivos,title:PRONTOS.nome}); }
+      catch(e){ if(e.name!=="AbortError") baixarZip(PRONTOS.arquivos,PRONTOS.nome); } }});
 }
 
 async function pedirDownload(){

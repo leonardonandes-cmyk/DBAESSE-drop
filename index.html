@@ -878,7 +878,10 @@ async function baixarCores(){
     if(b) arquivos.push(new File([b], hifen(p.nome)+"-foto-"+(k+1)+".jpg", {type:b.type||"image/jpeg"}));
   }
   if(!arquivos.length){ aviso("Fotos indisponíveis no momento"); return; }
-  // celular: abre o compartilhar do sistema (salvar na galeria / mandar no WhatsApp)
+  // Android: baixa as fotos soltas → caem direto na galeria (álbum Download)
+  if(ehAndroid()){ await baixarSoltas(arquivos); return; }
+  // iPhone: o compartilhar do sistema é o único caminho até as Fotos ("Salvar X imagens")
+  if(ehCelular() && navigator.canShare && navigator.canShare({files:arquivos})) aviso('Toque em "Salvar '+arquivos.length+(arquivos.length>1?' imagens"':' imagem"'));
   if(ehCelular() && navigator.canShare && navigator.canShare({files:arquivos})){
     try{ await navigator.share({files:arquivos, title:p.nome}); return; }
     catch(e){ if(e.name==="AbortError") return;
@@ -886,6 +889,16 @@ async function baixarCores(){
   }
   // computador (ou celular sem compartilhar): baixa tudo num .zip
   baixarZip(arquivos,p.nome);
+}
+function ehAndroid(){ return /Android/i.test(navigator.userAgent||""); }
+async function baixarSoltas(arquivos){
+  for(const f of arquivos){
+    const u=URL.createObjectURL(f), a=document.createElement("a");
+    a.href=u; a.download=f.name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(u),60000);
+    await new Promise(r=>setTimeout(r,600));
+  }
+  aviso(arquivos.length+(arquivos.length>1?" fotos salvas na galeria":" foto salva na galeria"));
 }
 // celular/tablet de verdade (no Windows o Chrome/Edge também "compartilha", mas lá queremos baixar)
 function ehCelular(){
